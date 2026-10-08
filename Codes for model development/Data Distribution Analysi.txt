@@ -1,0 +1,320 @@
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+
+# ---------------------------
+# Utilities: metrics
+# ---------------------------
+def topk_share(counts: np.ndarray, k: int = 10) -> float:
+    counts = np.asarray(counts, dtype=float)
+    counts = np.sort(counts)[::-1]
+    return counts[:k].sum() / counts.sum()
+
+def hhi(counts: np.ndarray) -> float:
+    counts = np.asarray(counts, dtype=float)
+    p = counts / counts.sum()
+    return float(np.sum(p ** 2))
+
+def gini_from_counts(counts: np.ndarray) -> float:
+    """
+    Gini coefficient for discrete distribution.
+    0 = perfectly even, 1 = maximally concentrated.
+    """
+    counts = np.asarray(counts, dtype=float)
+    if counts.sum() == 0:
+        return np.nan
+    p = counts / counts.sum()
+    p = np.sort(p)  # ascending
+    n = len(p)
+    return float(1 - 2 * np.sum((n - np.arange(n)) * p) / n)
+
+def summarize_distribution(series: pd.Series, name: str) -> dict:
+    vc = series.value_counts(dropna=True)
+    counts = vc.values
+    return {
+        f"{name}_num_categories": int(vc.shape[0]),
+        f"{name}_N": int(counts.sum()),
+        f"{name}_top10_share": float(topk_share(counts, 10)),
+        f"{name}_gini": float(gini_from_counts(counts)),
+        f"{name}_hhi": float(hhi(counts)),
+        f"{name}_top10_list": vc.head(10).to_dict(),
+        f"{name}_value_counts": vc
+    }
+
+
+# ---------------------------
+# Plot: frequency bar + cumulative top share line
+# + save underlying plotting data
+# ---------------------------
+def plot_frequency_with_cumshare(
+    vc: pd.Series,
+    title: str,
+    outpath: str,
+    topk_labels=(1, 5, 10),
+    max_categories=None,
+    data_outpath: str = None,
+    dpi: int = 1200
+):
+    """
+    vc: value_counts() sorted desc
+    Bar: counts (log10 axis)
+    Line: cumulative share (0-1)
+    data_outpath: if provided, save plotting data (rank, category, count, cum_share)
+    """
+    full_cats = vc.index.astype(str)
+    full_counts = vc.values.astype(float)
+    full_cum_share = np.cumsum(full_counts) / full_counts.sum()
+    if data_outpath is not None:
+        plot_df = pd.DataFrame({
+            "rank": np.arange(1, len(full_cats) + 1),
+            "category": full_cats,
+            "count": full_counts,
+            "cum_share": full_cum_share
+        })
+        plot_df.to_csv(data_outpath, index=False, encoding="utf-8-sig")
+
+    if max_categories is not None and vc.shape[0] > max_categories:
+        vc_plot = vc.iloc[:max_categories]
+    else:
+        vc_plot = vc
+
+    cats = vc_plot.index.astype(str)
+    counts = vc_plot.values.astype(float)
+    cum_share = np.cumsum(counts) / counts.sum()
+
+    fig, ax1 = plt.subplots(figsize=(10, 4.5))
+    ax1.bar(np.arange(len(cats)), counts)
+    ax1.set_yscale("log")
+    ax1.set_ylabel("Count (log scale)")
+    ax1.set_title(title)
+    ax1.set_xticks(np.arange(len(cats)))
+    ax1.set_xticklabels(cats, rotation=90)
+
+    ax2 = ax1.twinx()
+    ax2.plot(np.arange(len(cats)), cum_share, linewidth=2)
+    ax2.set_ylabel("Cumulative share")
+
+    full_total = full_counts.sum()
+    full_sorted = np.sort(full_counts)[::-1]
+    annot_text = []
+    for k in topk_labels:
+        share_k = full_sorted[:k].sum() / full_total
+        annot_text.append(f"Top{k}: {share_k:.1%}")
+    ax1.text(0.01, 0.98, "  ".join(annot_text),
+             transform=ax1.transAxes, va="top", ha="left")
+
+    fig.tight_layout()
+    fig.savefig(outpath, dpi=dpi)
+    plt.close(fig)
+
+
+# ---------------------------
+# Plot: mineral x element heatmaps
+# + save underlying matrix data
+# ---------------------------
+def plot_heatmap(
+    matrix: pd.DataFrame,
+    title: str,
+    outpath: str,
+    xtick_step=1,
+    ytick_step=1,
+    cbar_label="",
+    data_outpath: str = None,
+    cmap: str = "viridis",
+    dpi: int = 1200
+):
+    """
+    matrix: DataFrame (rows=minerals, cols=elements)
+    data_outpath: if provided, save matrix as CSV for reproducibility
+    cmap: matplotlib colormap name, e.g., 'viridis', 'magma', 'cividis', ...
+    """
+    if data_outpath is not None:
+        matrix.to_csv(data_outpath, index=True, encoding="utf-8-sig")
+
+    fig, ax = plt.subplots(figsize=(12, 7))
+    im = ax.imshow(matrix.values, aspect="auto", interpolation="nearest", cmap=cmap)
+    ax.set_title(title)
+
+    ax.set_xticks(np.arange(0, matrix.shape[1], xtick_step))
+    ax.set_xticklabels(matrix.columns.astype(str)[::xtick_step], rotation=90)
+    # ax.set_yticks(np.arange(0, matrix.shape[0], ytick_step))
+    # ax.set_yticklabels(matrix.index.astype(str)[::ytick_step])
+    ax.set_yticks(np.arange(0, matrix.shape[0], ytick_step))
+
+    def _fmt_idx(v):
+        s = str(v)
+        try:
+            x = float(s)
+            if x.is_integer():
+                return str(int(x))
+            return s  # 如果真的有 3.5 这种就保留
+        except Exception:
+            return s
+
+    ylabels = [_fmt_idx(v) for v in matrix.index.tolist()]
+    ax.set_yticklabels(ylabels[::ytick_step])
+
+    cbar = fig.colorbar(im, ax=ax)
+    if cbar_label:
+        cbar.set_label(cbar_label)
+
+    fig.tight_layout()
+    fig.savefig(outpath, dpi=dpi)
+    plt.close(fig)
+
+
+# ---------------------------
+# IO helper: read txt/csv/excel
+# ---------------------------
+def read_input_table(input_path: str, file_type: str = None, txt_sep: str = None) -> pd.DataFrame:
+    ext = os.path.splitext(input_path)[1].lower()
+    if file_type is None:
+        if ext in [".xlsx", ".xls"]:
+            file_type = "excel"
+        elif ext in [".csv"]:
+            file_type = "csv"
+        elif ext in [".txt", ".tsv"]:
+            file_type = "txt"
+        else:
+            file_type = "txt"
+
+    if file_type == "excel":
+        return pd.read_excel(input_path)
+    elif file_type == "csv":
+        return pd.read_csv(input_path)
+    elif file_type == "txt":
+        if txt_sep is None:
+            return pd.read_csv(input_path, sep=None, engine="python")
+        else:
+            return pd.read_csv(input_path, sep=txt_sep, engine="python")
+    else:
+        raise ValueError(f"Unsupported file_type: {file_type}")
+
+
+# ---------------------------
+# Main
+# ---------------------------
+def main(
+    input_path: str,
+    out_dir: str = r"D:\outputs",
+    file_type: str = None,
+    txt_sep: str = None,
+    dpi: int = 1200,
+    heatmap_cmap: str = "viridis"
+):
+    os.makedirs(out_dir, exist_ok=True)
+
+    df = read_input_table(input_path, file_type=file_type, txt_sep=txt_sep)
+
+    if df.shape[1] < 2:
+        raise ValueError("Input file must contain at least 2 columns: mineral_code and element/ion.")
+
+    mineral_col = df.columns[0]
+    element_col = df.columns[1]
+
+    df = df[[mineral_col, element_col]].dropna()
+    df[mineral_col] = df[mineral_col].astype(str).str.strip()
+    df[element_col] = df[element_col].astype(str).str.strip()
+
+    cleaned_pairs_path = os.path.join(out_dir, "cleaned_pairs.csv")
+    df.to_csv(cleaned_pairs_path, index=False, encoding="utf-8-sig")
+
+    mineral_stats = summarize_distribution(df[mineral_col], "mineral")
+    element_stats = summarize_distribution(df[element_col], "element")
+
+    print("=== Mineral distribution ===")
+    print(f"Categories: {mineral_stats['mineral_num_categories']}, N={mineral_stats['mineral_N']}")
+    print(f"Top10 share: {mineral_stats['mineral_top10_share']:.3f}")
+    print(f"Gini: {mineral_stats['mineral_gini']:.3f}")
+    print(f"HHI: {mineral_stats['mineral_hhi']:.4f}")
+
+    print("\n=== Element distribution ===")
+    print(f"Categories: {element_stats['element_num_categories']}, N={element_stats['element_N']}")
+    print(f"Top10 share: {element_stats['element_top10_share']:.3f}")
+    print(f"Gini: {element_stats['element_gini']:.3f}")
+    print(f"HHI: {element_stats['element_hhi']:.4f}")
+
+    mineral_vc_path = os.path.join(out_dir, "mineral_value_counts.csv")
+    element_vc_path = os.path.join(out_dir, "element_value_counts.csv")
+    mineral_stats["mineral_value_counts"].rename("count").to_csv(mineral_vc_path, encoding="utf-8-sig")
+    element_stats["element_value_counts"].rename("count").to_csv(element_vc_path, encoding="utf-8-sig")
+
+    plot_frequency_with_cumshare(
+        mineral_stats["mineral_value_counts"],
+        title="Mineral frequency (sorted) with cumulative share",
+        outpath=os.path.join(out_dir, "mineral_frequency.png"),
+        topk_labels=(1, 5, 10),
+        max_categories=None,
+        data_outpath=os.path.join(out_dir, "mineral_frequency_plotdata.csv"),
+        dpi=dpi
+    )
+
+    plot_frequency_with_cumshare(
+        element_stats["element_value_counts"],
+        title="Element/Ion frequency (sorted) with cumulative share",
+        outpath=os.path.join(out_dir, "element_frequency.png"),
+        topk_labels=(1, 5, 10),
+        max_categories=None,
+        data_outpath=os.path.join(out_dir, "element_frequency_plotdata.csv"),
+        dpi=dpi
+    )
+
+    # ---- mineral x element matrix ----
+    count_mat = pd.crosstab(df[mineral_col], df[element_col])
+
+    count_mat = count_mat.loc[
+        count_mat.sum(axis=1).sort_values(ascending=False).index,
+        count_mat.sum(axis=0).sort_values(ascending=False).index
+    ]
+
+    count_mat_path = os.path.join(out_dir, "mineral_x_element_count_matrix.csv")
+    count_mat.to_csv(count_mat_path, index=True, encoding="utf-8-sig")
+
+    # ---- ONLY log-count heatmap (presence部分已删除) ----
+    logc_mat = np.log10(count_mat + 1)
+    plot_heatmap(
+        logc_mat,
+        title="Mineral × Element data density (log10(count+1))",
+        outpath=os.path.join(out_dir, "coverage_logcount.png"),
+        xtick_step=1 if logc_mat.shape[1] <= 60 else 2,
+        ytick_step=1 if logc_mat.shape[0] <= 60 else 2,
+        cbar_label="log10(count+1)",
+        data_outpath=os.path.join(out_dir, "coverage_logcount_matrix.csv"),
+        cmap=heatmap_cmap,
+        dpi=dpi
+    )
+
+    with open(os.path.join(out_dir, "distribution_metrics.txt"), "w", encoding="utf-8") as f:
+        f.write("Mineral distribution\n")
+        f.write(f"Top10 share: {mineral_stats['mineral_top10_share']:.6f}\n")
+        f.write(f"Gini: {mineral_stats['mineral_gini']:.6f}\n")
+        f.write(f"HHI: {mineral_stats['mineral_hhi']:.6f}\n\n")
+
+        f.write("Element distribution\n")
+        f.write(f"Top10 share: {element_stats['element_top10_share']:.6f}\n")
+        f.write(f"Gini: {element_stats['element_gini']:.6f}\n")
+        f.write(f"HHI: {element_stats['element_hhi']:.6f}\n")
+
+    print(f"\nSaved everything to: {os.path.abspath(out_dir)}")
+    print("Figures: mineral_frequency.png, element_frequency.png, coverage_logcount.png")
+    print("Raw data saved:")
+    print(" - cleaned_pairs.csv")
+    print(" - mineral_value_counts.csv, element_value_counts.csv")
+    print(" - mineral_frequency_plotdata.csv, element_frequency_plotdata.csv")
+    print(" - mineral_x_element_count_matrix.csv")
+    print(" - coverage_logcount_matrix.csv")
+    print(" - distribution_metrics.txt")
+
+
+if __name__ == "__main__":
+    INPUT_PATH = r"D:\**.txt"
+    main(
+        INPUT_PATH,
+        out_dir=r"D:\outputs",
+        file_type="txt",
+        txt_sep=None,
+        dpi=1200,
+        heatmap_cmap="RdYlBu_r"  # <- 在这里换配色
+    )

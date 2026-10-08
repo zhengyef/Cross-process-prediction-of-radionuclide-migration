@@ -1,0 +1,187 @@
+# lof_sweep.py
+import os
+import numpy as np
+import pandas as pd
+from sklearn.neighbors import LocalOutlierFactor
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+from typing import List, Dict, Union
+
+IN_PATH = r'D:\**.txt'  
+OUT_DIR = r'D:\***'
+N_FEATURES = 31
+CONTAMINATION = 0.01
+NEIGHBORS_LIST = [10, 15, 20, 25, 30, 40, 50]
+SEED = 42
+ENCODING = 'utf-8'
+DELIMITER = '\t'
+TXT_DELIMITER = '\t'
+
+os.makedirs(OUT_DIR, exist_ok=True)
+print(f"[INFO] 输出目录已确认/创建: {OUT_DIR}")
+
+def set_ylim_safe(ax, values, default=(0.0, 1.0), buffer_ratio=0.1, min_padding=0.02):
+    vals = [float(v) for v in values if np.isfinite(v)]
+    if not vals:
+        ax.set_ylim(*default)
+        return
+    lo, hi = min(vals), max(vals)
+    if lo == hi:
+        pad = max(min_padding, abs(lo) * 0.05)
+        ax.set_ylim(lo - pad, hi + pad)
+    else:
+        pad = (hi - lo) * buffer_ratio
+        ax.set_ylim(lo - pad, hi + pad)
+
+def load_data_safely(file_path: str, delimiter: str, expected_cols: int) -> np.ndarray:
+    try:
+        df = pd.read_csv(
+            file_path,
+            delimiter=delimiter,
+            header=None,
+            skip_blank_lines=True,
+            error_bad_lines=False,
+            warn_bad_lines=True,
+            encoding=ENCODING,
+            dtype=str
+        )
+        df = df.replace('#NUM!', np.nan).replace('', np.nan)
+        df = df.applymap(lambda x: np.nan if isinstance(x, str) and x.strip() == '' else x)
+        df = df.astype(np.float64)
+        row_col_counts = df.notna().sum(axis=1)
+        valid_rows = row_col_counts == expected_cols
+        df = df[valid_rows].reset_index(drop=True)
+        data = df.values
+        if data.ndim != 2 or data.shape[1] != expected_cols:
+            raise ValueError(f"数据形状错误 {data.shape}")
+        return data
+    except Exception as e:
+        raise RuntimeError(f"数据读取失败：{str(e)}") from e
+
+print(f"[INFO] 开始读取数据: {IN_PATH}")
+data = load_data_safely(IN_PATH, DELIMITER, N_FEATURES)
+n_samples, n_features = data.shape
+print(f"[INFO] 数据读取完成：样本数: {n_samples}, 特征数: {n_features}")
+
+def run_lof(k: int, data: np.ndarray, contamination: float) -> Dict[str, Union[int, float, np.ndarray]]:
+    lof = LocalOutlierFactor(
+        n_neighbors=k,
+        contamination=contamination,
+        novelty=False,
+        n_jobs=-1
+    )
+    y_pred = lof.fit_predict(data)
+    scores = -lof.negative_outlier_factor_
+    out_idx = np.where(y_pred == -1)[0]
+    n_out = len(out_idx)
+    out_ratio = n_out / len(data)
+    score_threshold = np.min(scores[out_idx]) if n_out > 0 else np.nan
+    return {
+        "k": k,
+        "n_outliers": n_out,
+        "outlier_ratio": out_ratio,
+        "score_mean_outliers": scores[out_idx].mean() if n_out > 0 else np.nan,
+        "score_mean_inliers": scores[np.where(y_pred == 1)[0]].mean() if (len(data) - n_out) > 0 else np.nan,
+        "score_threshold": score_threshold,
+        "outlier_indices": out_idx,
+        "all_scores": scores
+    }
+
+results: List[Dict] = []
+for k in NEIGHBORS_LIST:
+    try:
+        res = run_lof(k, data, CONTAMINATION)
+        results.append(res)
+        print(f"[k={k:>2}] 异常数={res['n_outliers']:>3}, 占比={res['outlier_ratio']:.2%}")
+    except Exception as e:
+        print(f"[ERROR] k={k} 执行失败：{str(e)}")
+
+if not results:
+    raise RuntimeError("所有k值执行失败")
+
+def jaccard_similarity(set_a: np.ndarray, set_b: np.ndarray) -> float:
+    a, b = set(set_a.tolist()), set(set_b.tolist())
+    return len(a & b) / len(a | b) if (a or b) else 1.0
+
+def score_correlation(score_a: np.ndarray, score_b: np.ndarray) -> float:
+    return np.corrcoef(score_a, score_b)[0, 1]
+
+stability_metrics = {"jaccard_vs_prev": [np.nan], "score_corr_vs_prev": [np.nan]}
+for i in range(1, len(results)):
+    prev_res, curr_res = results[i-1], results[i]
+    stability_metrics["jaccard_vs_prev"].append(
+        jaccard_similarity(prev_res["outlier_indices"], curr_res["outlier_indices"]))
+    stability_metrics["score_corr_vs_prev"].append(
+        score_correlation(prev_res["all_scores"], curr_res["all_scores"]))
+
+def select_suggest_k(results: List[Dict], stability_metrics: Dict, min_jaccard: float = 0.6) -> int:
+    temp_data = []
+    for i, res in enumerate(results):
+        temp_data.append({
+            "k": res["k"],
+            "out_ratio": res["outlier_ratio"],
+            "jaccard": stability_metrics["jaccard_vs_prev"][i],
+            "ratio_deviation": abs(res["outlier_ratio"] - CONTAMINATION)
+        })
+    temp_df = pd.DataFrame(temp_data)
+    candidate_mask = temp_df["jaccard"] >= min_jaccard
+    if not candidate_mask.any():
+        candidate_mask[:] = True
+    candidates = temp_df[candidate_mask].sort_values(by=["ratio_deviation", "k"])
+    return int(candidates.iloc[0]["k"])
+
+suggest_k = select_suggest_k(results, stability_metrics)
+suggest_res = next(r for r in results if r["k"] == suggest_k)
+print(f"[SUGGEST] 建议 n_neighbors = {suggest_k}")
+
+plt.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans']
+plt.rcParams['axes.unicode_minus'] = False
+
+fig, ax = plt.subplots(figsize=(6,4))
+if outlier_scores.size > 0:
+    ax.hist(outlier_scores, bins=20, alpha=0.7, color='#C73E1D', label='异常样本')
+if normal_scores.size > 0:
+    ax.hist(normal_scores, bins=30, alpha=0.7, color='#2E86AB', label='正常样本')
+thr = suggest_res["score_threshold"]
+if np.isfinite(thr):
+    ax.axvline(thr, linestyle='--', color='black')
+ax.set_title(f'建议k={suggest_k}的异常分数分布')
+set_ylim_safe(ax, np.concatenate([outlier_scores, normal_scores]) if outlier_scores.size+normal_scores.size>0 else [0],
+              default=(0,1)) 
+plt.savefig(os.path.join(OUT_DIR, f"C_outlier_scores_k{suggest_k}.png")); plt.close()
+
+
+try:
+    pca = PCA(n_components=2, random_state=SEED)
+    X2 = pca.fit_transform(data)
+    out_set = set(suggest_res["outlier_indices"].tolist())
+    labels = np.array([-1 if i in out_set else 1 for i in range(len(data))])
+    fig, ax = plt.subplots(figsize=(6,4))
+    ax.scatter(X2[labels==1,0], X2[labels==1,1], s=8, color='#2E86AB', label='正常')
+    ax.scatter(X2[labels==-1,0], X2[labels==-1,1], s=12, color='#C73E1D', marker='x', label='异常')
+    ax.legend()
+    plt.savefig(os.path.join(OUT_DIR, f"D_PCA_k{suggest_k}.png")); plt.close()
+    df_pca = pd.DataFrame({"PCA1":X2[:,0],"PCA2":X2[:,1],"Label":["正常" if l==1 else "异常" for l in labels]})
+    df_pca.to_csv(os.path.join(OUT_DIR, f"PCA_scatter_data_k{suggest_k}.csv"), index=False, encoding="utf-8-sig")
+except Exception as e:
+    print(f"[WARN] PCA失败: {e}")
+
+print(f"[DONE] 所有结果已保存到: {OUT_DIR}")
+
+labeled_path = os.path.join(OUT_DIR, f'LOF标记数据_k{suggest_k}.txt')
+
+
+labels = np.zeros(n_samples, dtype=int)
+labels[list(suggest_res["outlier_indices"])] = 1
+
+
+df_original = pd.read_csv(IN_PATH, delimiter=DELIMITER, header=None, encoding=ENCODING, dtype=str)
+df_original = df_original.iloc[:n_samples, :]  # 对齐行数，避免越界
+
+
+df_original["is_outlier"] = labels
+
+
+df_original.to_csv(labeled_path, sep=TXT_DELIMITER, index=False, header=False, encoding=ENCODING)
+
+print(f"[DONE] 带异常标记的数据已保存: {labeled_path}")

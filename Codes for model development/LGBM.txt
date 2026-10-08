@@ -1,0 +1,261 @@
+from sklearn.model_selection import cross_val_score, KFold, cross_val_predict
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
+import numpy as np
+import pandas as pd
+import lightgbm as lgb
+from tqdm.tk import trange
+import shap
+import matplotlib.pyplot as plt
+
+
+import warnings
+import os
+import shap
+warnings.filterwarnings('ignore')
+
+data = pd.read_csv(r'C:\**.txt', sep='\s+', header=None)
+
+data.columns = ['Dw', 'redox', 'SSA', 'CEC', 'T', 'I', 'K', 'Na', 'Ca', 'Cl', 'HCO3-', 'SO42-',
+                      'pH','Im', 'EN', 'principal quantum number', 'atomic_number', 'z*', 'ψ', 'n*', 'Q', 'ri', 'μw',
+                      'κ-1', 'SP', 'Method','pd', 'm', 'Rs', 'Z','Kd', 'De']
+feats = [feat for feat in data.columns if feat != "De"]
+X = data[feats]
+y = data["De"]
+
+#%%
+def plot_fig(num, model, n, data1, data2, data3, dpi=500):
+    explainer = shap.TreeExplainer(model)
+    if (num - 1) == n:
+        shap_values = explainer.shap_values(data1)
+        shap.initjs()
+        Y_pred_test = model.predict(data2)
+        score_test = r2_score(data3, Y_pred_test)
+        print("第" + str(round(n+1)) + "次的预测R2:", score_test)
+
+        n_features = data1.shape[1]  
+
+        fig = plt.figure()
+        shap.summary_plot(shap_values, data1, plot_type='bar', max_display=n_features)
+        fig = plt.figure()
+        shap.summary_plot(shap_values[:, :], data1.iloc[:, :], max_display=n_features)
+
+
+        feature_importance = model.feature_importance(importance_type='gain')  # 或者使用 'split' 或 'weight'
+        sorted_indices = np.argsort(feature_importance)
+        sorted_feature_importance = feature_importance[sorted_indices]
+        sorted_feature_names = [data.columns[i] for i in sorted_indices]
+
+
+        plt.figure(figsize=(20, 16))
+        plt.barh(range(len(sorted_feature_names)), sorted_feature_importance, color='b', align='center')
+        plt.yticks(range(len(sorted_feature_names)), sorted_feature_names)
+        plt.xlabel('Feature Importance')
+        plt.ylabel('Feature Name')
+        plt.title('Feature Importance')
+        plt.show()
+
+ 
+        shap.plots.partial_dependence('Dw', model.predict, data1, ice=False)
+        shap.plots.partial_dependence('redox', model.predict, data1, ice=False)
+        
+
+        print("绘制完毕！")
+
+       
+        explainer = shap.TreeExplainer(model)
+        shap_values_numpy = explainer.shap_values(X)
+
+        fig, ax1 = plt.subplots(figsize=(25, 15), dpi=1200)
+
+        plt.sca(ax1)
+        shap.summary_plot(shap_values_numpy, X, feature_names=X.columns,
+                          plot_type="dot", show=False, color_bar=True, max_display=n_features)
+        ax1.set_position([0.1, 0.1, 0.65, 0.8])  
+
+ 
+        ax2 = ax1.twiny()  
+        plt.sca(ax2)
+        shap.summary_plot(shap_values_numpy, X, plot_type="bar",
+                          show=False, max_display=n_features)
+
+
+        ax2.set_position(ax1.get_position()) 
+        ax2.xaxis.set_label_position('top')  
+        ax2.xaxis.tick_top() 
+
+
+        ax2.axhline(y=13, color='gray', linestyle='-', linewidth=1)
+
+
+        bars = ax2.patches
+        for bar in bars:
+            bar.set_alpha(0.2)
+
+
+        ax1.set_xlabel('Shapley Value Contribution (Bee Swarm)', fontsize=12)
+        ax2.set_xlabel('Mean Shapley Value (Feature Importance)', fontsize=12)
+        ax1.set_ylabel('Features', fontsize=12)
+
+
+        plt.tight_layout()
+        plt.savefig("SHAP_combined_with_top_line_corrected.pdf", format='pdf', bbox_inches='tight')
+        plt.show()
+
+
+Train = []
+Vail = []
+Test = []
+R = []
+T = []
+
+
+n_splits = * 
+for i in range(*):
+    l = (i + 1) / 100
+    X_train,X_test,Y_train,Y_test = train_test_split(X, y, test_size=0.2,random_state=63),
+
+
+    params = {***}
+
+
+
+    kf = KFold(n_splits=n_splits, shuffle=True, random_state=17)
+   
+    for k, (train_index, vail_index) in enumerate(kf.split(X_train)):
+       
+        X_train_1 = X_train.iloc[train_index]
+        y_train_1 = Y_train.iloc[train_index]
+        X_vail_1 = X_train.iloc[vail_index]
+        y_vail_1 = Y_train.iloc[vail_index]
+       
+        lgb_train = lgb.Dataset(X_train_1, y_train_1) 
+        lgb_eval = lgb.Dataset(X_vail_1, y_vail_1, reference=lgb_train) 
+        lgbm = lgb.train(params,
+                         lgb_train,
+                         num_boost_round=10000,  
+                                                  )
+
+       
+        model_path = r'C:\**.txt'.format(k + 1)
+       
+        if os.path.exists(model_path):
+            os.remove(model_path)
+     
+        lgbm.save_model(model_path)
+
+
+        Y_pred_test = lgbm.predict(X_test, num_iteration=lgbm.best_iteration)#验证结果
+        score_test = r2_score(Y_test, Y_pred_test)
+        mse_test = mean_squared_error(Y_test, Y_pred_test)
+        mae_test = mean_absolute_error(Y_test, Y_pred_test)
+        rmse_test = mean_squared_error(Y_test, Y_pred_test) ** 0.5
+        mape_test = np.mean(np.abs((Y_pred_test - Y_test) / Y_test)) * 100
+        std_test = np.std(Y_test, ddof=0) 
+        rsr_test = rmse_test / std_test if std_test != 0 else np.nan  
+        print("Test第" + str(round(k + 1)) + "交叉分数R2:", score_test)
+        print("Test第" + str(round(k + 1)) + "交叉分数mse:", mse_test)
+        print("Test第" + str(round(k + 1)) + "交叉分数mae:", mae_test)
+        print("Test第" + str(round(k + 1)) + "交叉分数rmse:", rmse_test)
+        print("Test第" + str(round(k + 1)) + "交叉分数mape:", mape_test)
+        print("Test第" + str(round(k + 1)) + "交叉分数RSR:", rsr_test)
+        data_test = np.column_stack((X_test, Y_test, Y_pred_test))
+        np.savetxt(r'C:\**.txt'.format(k + 1), data_test,fmt='%15E')
+
+        print("-----------------------------------------")
+
+
+
+        # plot_fig(5, lgbm, k, X_train, X_test, Y_test)
+
+        if k == 0:
+            pred_test = Y_pred_test
+            # pred_train = Y_pred_train
+            # pred_vail = Y_pred_vail
+        else:
+            pred_test = np.column_stack((pred_test, Y_pred_test))
+            # pred_train = np.column_stack((pred_train, Y_pred_train))
+            # pred_vail = np.column_stack((pred_vail, Y_pred_vail))
+
+        if k == 0:
+            train_score = score_train
+            train_mse = mse_train
+            train_mae = mae_train
+            train_rmse = rmse_train
+            train_mape = mape_train
+            train_rsr = rsr_train
+        else:
+            train_score = np.column_stack((train_score, score_train))
+            train_mse = np.column_stack((train_mse, mse_train))
+            train_mae = np.column_stack((train_mae, mae_train))
+            train_rmse = np.column_stack((train_rmse, rmse_train))
+            train_mape = np.column_stack((train_mape, mape_train))
+            train_rsr = np.column_stack((train_rsr, rsr_train))
+        if k == 0:
+            vail_score = score_vail
+            vail_mse = mse_vail
+            vail_mae = mae_vail
+            vail_rmse = rmse_vail
+            vail_mape = mape_vail
+            vail_rsr = rsr_vail
+        else:
+            vail_score = np.column_stack((vail_score, score_vail))
+            vail_mse = np.column_stack((vail_mse, mse_vail))
+            vail_mae = np.column_stack((vail_mae, mae_vail))
+            vail_rmse = np.column_stack((vail_rmse, rmse_vail))
+            vail_mape = np.column_stack((vail_mape, mape_vail))
+            vail_rsr = np.column_stack((vail_rsr, rsr_vail))
+        if k == 0:
+            test_score = score_test
+            test_mse = mse_test
+            test_mae = mae_test
+            test_rmse = rmse_test
+            test_mape = mape_test
+            test_rsr = rsr_test
+        else:
+            test_score = np.column_stack((test_score, score_test))
+            test_mse = np.column_stack((test_mse, mse_test))
+            test_mae = np.column_stack((test_mae, mae_test))
+            test_rmse = np.column_stack((test_rmse, rmse_test))
+            test_mape = np.column_stack((test_mape, mape_test))
+            test_rsr = np.column_stack((test_rsr, rsr_test))
+
+    print("Mean R2 Score of train: {:.4f}".format(np.mean(train_score)))
+    print("Mean R2 Score of vail: {:.4f}".format(np.mean(vail_score)))
+    print("Mean R2 Score of test: {:.4f}".format(np.mean(test_score)))
+  
+    R.append(np.mean(test_score))
+    T.append(np.mean(vail_score))
+
+R = np.array(R)
+e = np.column_stack((R.reshape(-1, 1)))
+
+np.savetxt(r'C:\**.txt', e, fmt='%15E')  # '%.4f'/'%15E'
+
+
+
+mean_pred = np.mean(pred_test, axis=1)
+pred_error = np.std(pred_test, axis=1)
+
+
+import matplotlib.pyplot as plt
+import numpy as np 
+
+
+np.savetxt(
+    'error_bar_data.txt',
+    np.column_stack((Y_test, mean_pred, pred_error)),
+    header='Y_test, mean_pred, pred_error', 
+    delimiter=',',  
+    fmt='%.6f' 
+)
+
+
+plt.plot(Y_test, Y_test, c='C3', label=r'$b_{\rm test}$')
+plt.errorbar(Y_test, mean_pred, pred_error, fmt='o', ecolor='g', color='g',
+             elinewidth=2, capsize=4, label='预测值与误差') 
+plt.xlabel('实际值')  
+plt.ylabel('预测值') 
+plt.legend()  
+plt.title('预测值与实际值对比（数据已保存到error_bar_data.txt）')  
+plt.show()

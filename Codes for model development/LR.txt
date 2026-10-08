@@ -1,0 +1,188 @@
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import train_test_split, KFold
+from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
+from tqdm.tk import trange
+import warnings
+import matplotlib.pyplot as plt
+
+warnings.filterwarnings('ignore')
+
+
+data = pd.read_csv(r'E:\**.txt',sep='\s+',header=None).fillna(0)
+
+data.columns = [**]
+feats = [feat for feat in data.columns if feat not in ["*"]]
+X = data[feats]
+y = data["*"]
+
+
+Train = []
+Vail = []
+Test = []
+R = []
+r = []
+n_splits = *
+
+
+for i in trange(*):
+    l = (i + 1) / 100
+
+    X_train, X_test, Y_train, Y_test = train_test_split(X, y, test_size=0.2, random_state=32)
+
+
+    model = LinearRegression()
+
+
+    kf = KFold(n_splits=n_splits, shuffle=True, random_state=49)
+
+    for k, (train_index, vail_index) in enumerate(kf.split(X_train)):
+        L = len(train_index) / len(vail_index)
+        print("训练集与验证集的比值：", L)
+
+
+        X_train_1 = X_train.iloc[train_index]
+        y_train_1 = Y_train.iloc[train_index]
+        X_vail_1 = X_train.iloc[vail_index]
+        y_vail_1 = Y_train.iloc[vail_index]
+
+        print(X_train_1)
+        print(f"训练集样本数：{len(train_index)}")
+        print(f"验证集样本数：{len(vail_index)}")
+
+
+        model.fit(X_train_1, y_train_1)
+
+    
+        Y_pred_train_1 = model.predict(X_train_1)
+        score_train = r2_score(y_train_1, Y_pred_train_1)
+        mse_train = mean_squared_error(y_train_1, Y_pred_train_1)
+        mae_train = mean_absolute_error(y_train_1, Y_pred_train_1)
+        rmse_train = mean_squared_error(y_train_1, Y_pred_train_1) ** 0.5
+        mape_train = np.mean(np.abs((Y_pred_train_1 - y_train_1) / y_train_1)) * 100
+
+        print(f"Train第{k + 1}交叉分数R2: {score_train}")
+        print(f"Train第{k + 1}交叉分数mse: {mse_train}")
+        print(f"Train第{k + 1}交叉分数mae: {mae_train}")
+        print(f"Train第{k + 1}交叉分数rmse: {rmse_train}")
+        print(f"Train第{k + 1}交叉分数mape: {mape_train}")
+
+
+        data_train = np.column_stack((X_train_1, y_train_1, Y_pred_train_1))
+        np.savetxt(rf'E:\**.txt', data_train, fmt='%15E')
+
+
+       
+
+        print(f'循环次数：{i + 1}')
+
+
+        if k == 0:
+            pred_test = Y_pred_test
+        else:
+            pred_test = np.column_stack((pred_test, Y_pred_test))
+
+
+        if k == 0:
+            train_score = score_train
+            train_mse = mse_train
+            train_mae = mae_train
+            train_rmse = rmse_train
+            train_mape = mape_train
+        else:
+            train_score = np.column_stack((train_score, score_train))
+            train_mse = np.column_stack((train_mse, mse_train))
+            train_mae = np.column_stack((train_mae, mae_train))
+            train_rmse = np.column_stack((train_rmse, rmse_train))
+            train_mape = np.column_stack((train_mape, mape_train))
+
+
+        if k == 0:
+            vail_score = score_vail
+            vail_mse = mse_vail
+            vail_mae = mae_vail
+            vail_rmse = rmse_vail
+            vail_mape = mape_vail
+        else:
+            vail_score = np.column_stack((vail_score, score_vail))
+            vail_mse = np.column_stack((vail_mse, mse_vail))
+            vail_mae = np.column_stack((vail_mae, mae_vail))
+            vail_rmse = np.column_stack((vail_rmse, rmse_vail))
+            vail_mape = np.column_stack((vail_mape, mape_vail))
+
+
+        if k == 0:
+            test_score = score_test
+            test_mse = mse_test
+            test_mae = mae_test
+            test_rmse = rmse_test
+            test_mape = mape_test
+        else:
+            test_score = np.column_stack((test_score, score_test))
+            test_mse = np.column_stack((test_mse, mse_test))
+            test_mae = np.column_stack((test_mae, mae_test))
+            test_rmse = np.column_stack((test_rmse, rmse_test))
+            test_mape = np.column_stack((test_mape, mape_test))
+
+
+        print(f"Mean R2 Score of train: {np.mean(train_score):.4f}")
+        print(f"Mean R2 Score of vail: {np.mean(vail_score):.4f}")
+        print(f"Mean R2 Score of test: {np.mean(test_score):.4f}")
+        print(f"Mean mse of train: {np.mean(train_mse):.4f}")
+        print(f"Mean mse of vail: {np.mean(vail_mse):.4f}")
+        print(f"Mean mse of test: {np.mean(test_mse):.4f}")
+        print(f"Mean mae of train: {np.mean(train_mae):.4f}")
+        print(f"Mean mae of vail: {np.mean(vail_mae):.4f}")
+        print(f"Mean mae of test: {np.mean(test_mae):.4f}")
+        print(f"Mean rmse of train: {np.mean(train_rmse):.4f}")
+        print(f"Mean rmse of vail: {np.mean(vail_rmse):.4f}")
+        print(f"Mean rmse of test: {np.mean(test_rmse):.4f}")
+        print(f"Mean mape of train: {np.mean(train_mape):.4f}")
+        print(f"Mean mape of vail: {np.mean(vail_mape):.4f}")
+        print(f"Mean mape of test: {np.mean(test_mape):.4f}")
+
+
+    R.append(np.mean(test_score))
+    r.append(np.mean(vail_score))
+
+
+R = np.array(R)
+e = np.column_stack((R.reshape(-1, 1)))
+np.savetxt(r'E:\code\diffusion\FJX\2-fjx\GXW\FZY\9223-LR\LR-kf-r2.txt', e, fmt='%15E')
+
+mean_pred = np.mean(pred_test, axis=1)
+pred_error = np.std(pred_test, axis=1)
+
+
+plt.plot(Y_test, Y_test, c='C3', label=r'$b_{\rm test}$')
+plt.errorbar(Y_test, mean_pred, pred_error, fmt='o', ecolor='g', color='g', elinewidth=2, capsize=4)
+plt.legend()
+plt.show()
+mean_pred = np.mean(pred_test, axis=1)
+pred_error = np.std(pred_test, axis=1)
+
+
+import matplotlib.pyplot as plt
+import numpy as np 
+
+
+np.savetxt(r'E:\**.txt',
+    np.column_stack((Y_test, mean_pred, pred_error)),
+    header='Y_test, mean_pred, pred_error',  
+    delimiter=',',  
+    fmt='%.6f'  
+)
+
+
+
+import matplotlib.pyplot as plt
+import numpy as np  
+
+np.savetxt(r'E:\**.txt',
+    np.column_stack((Y_test, mean_pred, pred_error)),
+    header='Y_test, mean_pred, pred_error', 
+    delimiter=',',  
+    fmt='%.6f'  
+)
+
